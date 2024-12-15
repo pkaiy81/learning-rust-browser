@@ -1,9 +1,8 @@
 extern crate alloc;
-use crate::alloc::string::ToString;
 use alloc::format;
 use alloc::string::String;
+use alloc::string::ToString;
 use alloc::vec::Vec;
-use core::fmt::Error;
 use noli::net::lookup_host;
 use noli::net::SocketAddr;
 use noli::net::TcpStream;
@@ -46,6 +45,7 @@ impl HttpClient {
             }
         };
 
+        // Build the HTTP request
         let mut request = String::from("GET /");
         request.push_str(&path);
         request.push_str(" HTTP/1.1\n");
@@ -70,7 +70,7 @@ impl HttpClient {
         loop {
             let mut buf = [0u8; 4096];
             let bytes_read = match stream.read(&mut buf) {
-                OK(bytes) => bytes,
+                Ok(bytes) => bytes,
                 Err(_) => {
                     return Err(Error::Network(
                         "Failed to reecive a request from TCP stream".to_string(),
@@ -83,11 +83,11 @@ impl HttpClient {
             }
             // https://doc.rust-lang.org/std/vec/struct.Vec.html#method.extend_from_slice
             // Concatenate the received buffer to the received vector
-            received.extebd_from_slice(&buf[..bytes_read]);
+            received.extend_from_slice(&buf[..bytes_read]);
         }
 
         match core::str::from_utf8(&received) {
-            OK(response) => HttpResponse::new(response.to_string()),
+            Ok(response) => HttpResponse::new(response.to_string()),
             Err(e) => Err(Error::Network(format!("Invalid received response: {}", e))),
         }
     }

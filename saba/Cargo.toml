@@ -13,7 +13,7 @@ wasabi = ["dep:net_wasabi", "dep:noli"]
 
 [[bin]]
 name = "saba"
-path = "sec/main.rs"
+path = "src/main.rs"
 required-features = ["wasabi"]
 
 [dependencies]

@@ -1,10 +1,18 @@
+use crate::renderer::dom::node::Element;
+use crate::renderer::dom::node::ElementKind;
 use crate::renderer::dom::node::Node;
+use crate::renderer::dom::node::NodeKind;
 use crate::renderer::dom::node::Window;
+use crate::renderer::html::attribute::Attribute;
 use crate::renderer::html::token::HtmlToken;
 use crate::renderer::html::token::HtmlTokenizer;
 use alloc::rc::Rc;
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::RefCell;
+use core::str::FromStr;
+
+use super::attribute;
 
 /// https://html.spec.whatwg.org/multipage/parsing.html#the-insertion-mode
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -42,6 +50,68 @@ impl HtmlParser {
         }
     }
 
+    fn create_element(&self, tag: &str, attributes: Vec<Attribute>) -> Node {
+        Node::new(NodeKind::Element(Element::new(tag, attributes)))
+    }
+
+    // insert_element adds a new element to the DOM tree.
+    // 1. Get the last element from the stack of open elements. This node called "current".
+    // 2. If the stack is empty, root element is current.
+    // 3. Create a new node and store it to the node variable formatted as RC<RefCell<Node>> to wrap the node.
+    // 4/5/6. If the current node has already a child node, then add the new node to the last child node after finding the brother node.
+    // 7/8. If the brother node is not found, then set the new node as the first child node of the current node.
+    // 9. Set the new node as the last child node of the current node.
+    // 10. Set the parent node of the new node as the current node.
+    //     These steps are necessary to prevent the circular reference.(Rc::downgrade)
+    // 11. Lastly, push the new node to the stack of open elements.
+    // ref. https://html.spec.whatwg.org/multipage/parsing.html#insert-a-foreign-element
+    fn insert_element(&mut self, tag: &str, attributes: Vec<Attribute>) {
+        let window = self.window.borrow();
+        let current = match self.stack_of_open_elements.last() {
+            // 1
+            Some(n) => n.clone(),
+            None => window.document, // 2
+        };
+        let node = Rc::new(RefCell::new(self.create_element(tag, attributes))); // 3
+
+        if current.borrow().first_child().is_some() {
+            // 4
+            let mut last_sibiling = current.borrow().first_child();
+            loop {
+                // 5
+                last_sibiling = match last_sibiling {
+                    Some(ref node) => {
+                        if node.borrow().next_sibling().is_some() {
+                            node.borrow().next_sibling()
+                        } else {
+                            break;
+                        }
+                    }
+                    None => unimplemented!("last_sibiling should be Some."),
+                }
+            }
+
+            last_sibiling
+                .unwrap()
+                .borrow_mut()
+                .set_next_sibling(Some(node.clone())); // 6
+            node.borrow_mut().set_previous_sibling(Rc::downgrade(
+                &current
+                    .borrow()
+                    .first_child()
+                    .expect("failed to get a first child."),
+            ))
+        } else {
+            // 7
+            current.borrow_mut().set_first_child(Some(node.clone())); // 8
+        }
+
+        current.borrow_mut().set_last_child(Rc::downgrade(&node)); // 9
+        node.borrow_mut().set_parent(Rc::downgrade(&current)); // 10
+
+        self.stack_of_open_elements.push(node); // 11
+    }
+
     pub fn construct_tree(&mut self) -> Rc<RefCell<Window>> {
         let mut token = self.t.next();
 
@@ -58,6 +128,291 @@ impl HtmlParser {
 
                     self.mode = InsertionMode::BeforeHtml;
                     continue;
+                }
+
+                // BeforeHtml handles mainly <html> tag.
+                // 1. If the token is a space character or return character, ignore the token and move to the next token.
+                // 2. If the token is a start tag token whose tag name is "html", then add a new node to the DOM tree.
+                //    And change the insertion mode to "BeforeHead".
+                // 3. When the token is EOF, return the DOM tree.
+                // 4. Otherwise, add the HTML element to the DOM tree.
+                InsertionMode::BeforeHtml => {
+                    match token {
+                        Some(HtmlToken::Char(c)) => {
+                            if c == ' ' || c == '\n' {
+                                token = self.t.next();
+                                continue;
+                            }
+                        }
+                        Some(HtmlToken::StartTag {
+                            ref tag,
+                            self_closing: _,
+                            ref attributes,
+                        }) => {
+                            if tag == "html" {
+                                self.insert_element(tag, attributes.to_vec());
+                                self.mode = InsertionMode::BeforeHead;
+                                token = self.t.next();
+                                continue;
+                            }
+                        }
+                        Some(HtmlToken::EndTag { ref tag }) => {
+                            if tag != "head" || tag != "body" || tag != "html" || tag != "br" {
+                                token = self.t.next();
+                                continue;
+                            }
+                        }
+                        Some(HtmlToken::Eof) | None => {
+                            return self.window.clone();
+                        }
+                    }
+                    self.insert_element("html", Vec::new());
+                    self.mode = InsertionMode::BeforeHead;
+                    continue;
+                }
+
+                // BeforeHead handles mainly <head> tag.
+                // 1. If the token is a space character or return character, ignore the token and move to the next token.
+                // 2. If the token is a start tag token whose tag name is "head", then add a new node to the DOM tree.
+                //    And change the insertion mode to "InHead".
+                // 3. Otherwise, add the HTML element to the DOM tree.
+                InsertionMode::BeforeHead => {
+                    match token {
+                        Some(HtmlToken::Char(c)) => {
+                            if c == ' ' || c == '\n' {
+                                token = self.t.next();
+                                continue;
+                            }
+                        }
+                        Some(HtmlToken::StartTag {
+                            ref tag,
+                            self_closing: _,
+                            ref attributes,
+                        }) => {
+                            if tag == "head" {
+                                self.insert_element(tag, attributes.to_vec());
+                                self.mode = InsertionMode::InHead;
+                                token = self.t.next();
+                                continue;
+                            }
+                        }
+                        Some(HtmlToken::Eof) | None => {
+                            return self.window.clone();
+                        }
+                        _ => {}
+                    }
+                    self.insert_element("head", Vec::new());
+                    self.mode = InsertionMode::InHead;
+                    continue;
+                }
+
+                // InHead handles mainly end tag of <head> and start tag of <style> and <script>.
+                // 1. If the token is a space character or return character, ignore the token and move to the next token.
+                // 2. If the token is a start tag token whose tag name is "style" or "script", then add a new node to the DOM tree.
+                //    And change the insertion mode to "Text".
+                // NOTE: According to the specification, <style> and <script> tags are not same, but they are treated as same in this version.
+                // 5. If the token is an end tag token whose tag name is "head", then change the insertion mode to "AfterHead".
+                // 6. Otherwise, ignore the token and move to the next token.
+                InsertionMode::InHead => {
+                    match token {
+                        Some(HtmlToken::Char(c)) => {
+                            if c == ' ' || c == '\n' {
+                                token = self.t.next();
+                                continue;
+                            }
+                        }
+                        Some(HtmlToken::StartTag {
+                            ref tag,
+                            self_closing: _,
+                            ref attributes,
+                        }) => {
+                            if tag == "style" || tag == "script" {
+                                self.insert_element(tag, attributes.to_vec());
+                                self.original_insertion_mode = self.mode;
+                                self.mode = InsertionMode::Text;
+                                token = self.t.next();
+                                continue;
+                            }
+                            // The following code is not in the specification.
+                            // But, it is necessary to handle the ommited <head> tag in HTML.
+                            // If this code is not included, infinite loop occurs.
+                            if tag == "head" {
+                                self.pop_util(ElementKind::Head);
+                                self.mode = InsertionMode::AfterHead;
+                                continue;
+                            }
+                            if let Ok(_element_kind) = ElementKind::from_str(tag) {
+                                self.pop_util(ElementKind::Head);
+                                self.mode = InsertionMode::AfterHead;
+                                continue;
+                            }
+                        }
+                        Some(HtmlToken::EndTag { ref tag }) => {
+                            if tag == "head" {
+                                self.mode = InsertionMode::AfterHead;
+                                token = self.t.next();
+                                self.pop_util(ElementKind::Head);
+                                continue;
+                            }
+                        }
+                        Some(HtmlToken::Eof) | None => {
+                            return self.window.clone();
+                        }
+                    }
+                    // Ignore the unsupported tag. For example, <meta>, <title>, etc.
+                    token = self.t.next();
+                    continue;
+                } // AfterHead handles mainly start tag of <body> tag.
+
+                // AfterHead handles mainly start tag of <body> tag.
+                // 1. If the token is a space character or return character, ignore the token and move to the next token.
+                // 2. If the token is a start tag token whose tag name is "body", then add a new node to the DOM tree.
+                //    And change the insertion mode to "InBody".
+                // 3. Otherwise, add the HTML element to the DOM tree.
+                InsertionMode::AfterHead => {
+                    match token {
+                        Some(HtmlToken::Char(c)) => {
+                            if c == ' ' || c == '\n' {
+                                self.insert_char(c);
+                                token = self.t.next();
+                                continue;
+                            }
+                        }
+                        Some(HtmlToken::StartTag {
+                            ref tag,
+                            self_closing: _,
+                            ref attributes,
+                        }) => {
+                            if tag == "body" {
+                                self.insert_element(tag, attributes.to_vec());
+                                token = self.t.next();
+                                self.mode = InsertionMode::InBody;
+                                continue;
+                            }
+                        }
+                        Some(HtmlToken::Eof) | None => {
+                            return self.window.clone();
+                        }
+                        _ => {}
+                    }
+                    self.insert_element("body", Vec::new());
+                    self.mode = InsertionMode::InBody;
+                    continue;
+                }
+
+                // InBody handles mainly <body> tag tag(like <p>, <div>, etc.).
+                InsertionMode::InBody => {
+                    match token {
+                        Some(HtmlToken::EndTag { ref tag }) => {
+                            match tag.as_str() {
+                                "body" => {
+                                    self.mode = InsertionMode::AfterBody;
+                                    token = self.t.next();
+                                    if !self.contain_in_stack(ElementKind::Body) {
+                                        // Faile to parse the HTML. So, ignore the token.
+                                        continue;
+                                    }
+                                    self.pop_util(ElementKind::Body);
+                                    continue;
+                                }
+                                "html" => {
+                                    if self.pop_current_node(ElementKind::Body) {
+                                        self.mode = InsertionMode::AfterBody;
+                                        assert!(self.pop_current_node(ElementKind::Html));
+                                    } else {
+                                        token = self.t.next();
+                                    }
+                                    continue;
+                                }
+                                _ => {
+                                    token = self.t.next();
+                                }
+                            }
+                        }
+                        Some(HtmlToken::Eof) | None => {
+                            return self.window.clone();
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Text handles mainly text content.
+                // 1. If the token is end of <style> or <script> tag, then change the insertion mode to "original insertion mode".
+                // 2. Add the text content to the DOM tree until the token is end of <style> or <script> tag.
+                InsertionMode::Text => {
+                    match token {
+                        Some(HtmlToken::Eof) | None => {
+                            return self.window.clone();
+                        }
+                        Some(HtmlToken::EndTag { ref tag }) => {
+                            if tag == "style" {
+                                self.pop_util(ElementKind::Style);
+                                self.mode = self.original_insertion_mode;
+                                token = self.t.next();
+                                continue;
+                            }
+                            if tag == "script" {
+                                self.pop_util(ElementKind::Script);
+                                self.mode = self.original_insertion_mode;
+                                token = self.t.next();
+                                continue;
+                            }
+                        }
+                        Some(HtmlToken::Char(c)) => {
+                            self.insert_char(c);
+                            token = self.t.next();
+                            continue;
+                        }
+                        _ => {}
+                    }
+
+                    self.mode = self.original_insertion_mode;
+                }
+
+                // AfterBody handles mainly end of <html> tag.
+                // 1. If the token is a character token, then ignore the token and move to the next token.
+                // 2. If the token is an end of <html> tag, then change the insertion mode to "AfterAfterBody".
+                // 3. Otherwise, change the insertion mode to "InBody".
+                InsertionMode::AfterBody => {
+                    match token {
+                        Some(HtmlToken::Char(_c)) => {
+                            token = self.t.next();
+                            continue;
+                        }
+                        Some(HtmlToken::EndTag { ref tag }) => {
+                            if tag == "html" {
+                                self.mode = InsertionMode::AfterAfterBody;
+                                token = self.t.next();
+                                continue;
+                            }
+                        }
+                        Some(HtmlToken::Eof) | None => {
+                            return self.window.clone();
+                        }
+                        _ => {}
+                    }
+
+                    self.mode = InsertionMode::InBody;
+                }
+
+                // AfterAfterBody handles mainly end of the document.
+                // 1. If the token is a character token, then ignore the token and move to the next token.
+                // 2. If the token is EOF or None, then return the DOM tree.
+                // 3. Otherwise, change the insertion mode to "InBody" because the browser try to parse the HTML again if the content is not valid.
+                InsertionMode::AfterAfterBody => {
+                    match token {
+                        Some(HtmlToken::Char(_c)) => {
+                            token = self.t.next();
+                            continue;
+                        }
+                        Some(HtmlToken::Eof) | None => {
+                            return self.window.clone();
+                        }
+                        _ => {}
+                    }
+
+                    // Failed to parse the HTML. So, try to parse the HTML again.
+                    self.mode = InsertionMode::InBody;
                 }
             }
         }

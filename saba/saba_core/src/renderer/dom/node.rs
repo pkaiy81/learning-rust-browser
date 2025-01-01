@@ -153,16 +153,23 @@ impl Element {
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// https://dom.spec.whatwg.org/#interface-element
 pub enum ElementKind {
-    /// https://dom.spec.whatwg.org/multipage/semantics.html#the-html-element
+    /// https://html.spec.whatwg.org/multipage/semantics.html#the-html-element
     Html,
-    /// https://dom.spec.whatwg.org/multipage/semantics.html#the-head-element
+    /// https://html.spec.whatwg.org/multipage/semantics.html#the-head-element
     Head,
-    /// https://dom.spec.whatwg.org/multipage/semantics.html#the-style-element
+    /// https://html.spec.whatwg.org/multipage/semantics.html#the-style-element
     Style,
-    /// https://dom.spec.whatwg.org/multipage/semantics.html#the-script-element
+    /// https://html.spec.whatwg.org/multipage/scripting.html#the-script-element
     Script,
-    /// https://dom.spec.whatwg.org/multipage/semantics.html#the-body-element
+    /// https://html.spec.whatwg.org/multipage/sections.html#the-body-element
     Body,
+    /// https://html.spec.whatwg.org/multipage/grouping-content.html#the-p-element
+    P,
+    /// https://html.spec.whatwg.org/multipage/sections.html#the-h1,-h2,-h3,-h4,-h5,-and-h6-elements
+    H1,
+    H2,
+    /// https://html.spec.whatwg.org/multipage/text-level-semantics.html#the-a-element
+    A,
 }
 
 impl FromStr for ElementKind {
@@ -175,7 +182,11 @@ impl FromStr for ElementKind {
             "style" => Ok(ElementKind::Style),
             "script" => Ok(ElementKind::Script),
             "body" => Ok(ElementKind::Body),
-            _ => Err(format!("unimplemented element namae {:?}", s)),
+            "p" => Ok(ElementKind::P),
+            "h1" => Ok(ElementKind::H1),
+            "h2" => Ok(ElementKind::H2),
+            "a" => Ok(ElementKind::A),
+            _ => Err(format!("unimplemented element name {:?}", s)),
         }
     }
 }

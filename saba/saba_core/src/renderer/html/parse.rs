@@ -112,6 +112,116 @@ impl HtmlParser {
         self.stack_of_open_elements.push(node); // 11
     }
 
+    fn pop_current_node(&mut self, element_kind: ElementKind) -> bool {
+        let current = match self.stack_of_open_elements.last() {
+            Some(n) => n.clone(),
+            None => return false,
+        };
+
+        if current.borrow().element_kind() == Some(element_kind) {
+            self.stack_of_open_elements.pop();
+            return true;
+        }
+
+        false
+    }
+
+    // pop_util pops the element from the stack of open elements until the element is found.
+    fn pop_util(&mut self, element_kind: ElementKind) {
+        assert!(
+            self.contain_in_stack(element_kind),
+            "stack doesn't have an element {:?}",
+            element_kind,
+        );
+
+        loop {
+            let current = match self.stack_of_open_elements.pop() {
+                Some(n) => n,
+                None => return,
+            };
+
+            if current.borrow().element_kind() == Some(element_kind) {
+                return;
+            }
+        }
+    }
+
+    // contain_in_stack checks if the specified element is in the stack of open elements.
+    fn contain_in_stack(&mut self, element_kind: ElementKind) -> bool {
+        for i in 0..self.stack_of_open_elements.len() {
+            if self.stack_of_open_elements[i].borrow().element_kind() == Some(element_kind) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn create_char(&self, c: char) -> Node {
+        let mut s = String::new();
+        s.push(c);
+        Node::new(NodeKind::Text(s))
+    }
+
+    // insert_char adds a new text node to the DOM tree.
+    // 1. Get the last element from the stack of open elements. This node called "current".
+    // 2. If the stack is empty, it trys to add the text node to the root element. This is not appropriate, so it returns.
+    // 3. If the current node is NodeKind::Text, then add the text to the current node and return.
+    // 4. If the current node is not NodeKind::Text, then create a new text node.
+    // 5/6. If the current node has already a child node, then add the new node to the last child node.
+    // 7/8. If the brother node is not found, then set the new node as the first child node of the current node.
+    // 9. Set the new node as the last child node of the current node.
+    // 10. Set the parent node of the new node as the current node.(Rc::downgrade)
+    // 11. Lastly, push the new node to the stack of open elements.
+    // NOTE: The specification doesn't add the text node to the stack of open elements.
+    // https://html.spec.whatwg.org/multipage/parsing.html#insert-a-character
+    // Although our implementation of insert_char is different from the specification, basic behavior is the same.
+    fn insert_char(&mut self, c: char) {
+        let current = match self.stack_of_open_elements.last() {
+            // 1
+            Some(n) => n.clone(),
+            None => return, // 2
+        };
+
+        // If the current node is NodeKind::Text, then add the text to it.
+        if let NodeKind::Text(ref mut s) = &mut current.borrow_mut().kind() {
+            // 3
+            s.push(c);
+            return;
+        }
+
+        // Do not add the text node when the character is a space character or return character.
+        if c == '\n' || c == ' ' {
+            return;
+        }
+
+        let node = Rc::new(RefCell::new(self.create_char(c))); // 4
+
+        if current.borrow().first_child().is_some() {
+            // 5
+            current
+                .borrow()
+                .first_child()
+                .unwrap()
+                .borrow_mut()
+                .set_next_sibling(Some(node.clone())); // 6
+            node.borrow_mut().set_previous_sibling(Rc::downgrade(
+                &current
+                    .borrow()
+                    .first_child()
+                    .expect("failed to get a first child."),
+            ));
+        } else {
+            // 7
+            current.borrow_mut().set_first_child(Some(node.clone())); // 8
+        }
+
+        current.borrow_mut().set_last_child(Rc::downgrade(&node)); // 9
+        node.borrow_mut().set_parent(Rc::downgrade(&current)); // 10
+
+        self.stack_of_open_elements.push(node); // 11
+    }
+
     pub fn construct_tree(&mut self) -> Rc<RefCell<Window>> {
         let mut token = self.t.next();
 

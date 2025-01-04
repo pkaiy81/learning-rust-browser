@@ -68,7 +68,7 @@ impl HtmlParser {
         let current = match self.stack_of_open_elements.last() {
             // 1
             Some(n) => n.clone(),
-            None => window.document, // 2
+            None => window.document(), // 2
         };
         let node = Rc::new(RefCell::new(self.create_element(tag, attributes))); // 3
 

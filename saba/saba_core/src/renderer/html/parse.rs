@@ -12,8 +12,6 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::str::FromStr;
 
-use super::attribute;
-
 /// https://html.spec.whatwg.org/multipage/parsing.html#the-insertion-mode
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum InsertionMode {
@@ -112,22 +110,8 @@ impl HtmlParser {
         self.stack_of_open_elements.push(node); // 11
     }
 
-    fn pop_current_node(&mut self, element_kind: ElementKind) -> bool {
-        let current = match self.stack_of_open_elements.last() {
-            Some(n) => n.clone(),
-            None => return false,
-        };
-
-        if current.borrow().element_kind() == Some(element_kind) {
-            self.stack_of_open_elements.pop();
-            return true;
-        }
-
-        false
-    }
-
-    // pop_util pops the element from the stack of open elements until the element is found.
-    fn pop_util(&mut self, element_kind: ElementKind) {
+    // pop_until pops the element from the stack of open elements until the element is found.
+    fn pop_until(&mut self, element_kind: ElementKind) {
         assert!(
             self.contain_in_stack(element_kind),
             "stack doesn't have an element {:?}",
@@ -144,6 +128,20 @@ impl HtmlParser {
                 return;
             }
         }
+    }
+
+    fn pop_current_node(&mut self, element_kind: ElementKind) -> bool {
+        let current = match self.stack_of_open_elements.last() {
+            Some(n) => n.clone(),
+            None => return false,
+        };
+
+        if current.borrow().element_kind() == Some(element_kind) {
+            self.stack_of_open_elements.pop();
+            return true;
+        }
+
+        false
     }
 
     // contain_in_stack checks if the specified element is in the stack of open elements.
@@ -347,12 +345,12 @@ impl HtmlParser {
                             // But, it is necessary to handle the ommited <head> tag in HTML.
                             // If this code is not included, infinite loop occurs.
                             if tag == "head" {
-                                self.pop_util(ElementKind::Head);
+                                self.pop_until(ElementKind::Head);
                                 self.mode = InsertionMode::AfterHead;
                                 continue;
                             }
                             if let Ok(_element_kind) = ElementKind::from_str(tag) {
-                                self.pop_util(ElementKind::Head);
+                                self.pop_until(ElementKind::Head);
                                 self.mode = InsertionMode::AfterHead;
                                 continue;
                             }
@@ -361,7 +359,7 @@ impl HtmlParser {
                             if tag == "head" {
                                 self.mode = InsertionMode::AfterHead;
                                 token = self.t.next();
-                                self.pop_util(ElementKind::Head);
+                                self.pop_until(ElementKind::Head);
                                 continue;
                             }
                         }
@@ -413,6 +411,30 @@ impl HtmlParser {
                 // InBody handles mainly <body> tag tag(like <p>, <div>, etc.).
                 InsertionMode::InBody => {
                     match token {
+                        Some(HtmlToken::StartTag {
+                            ref tag,
+                            self_closing: _,
+                            ref attributes,
+                        }) => match tag.as_str() {
+                            "p" => {
+                                self.insert_element(tag, attributes.to_vec());
+                                token = self.t.next();
+                                continue;
+                            }
+                            "h1" | "h2" => {
+                                self.insert_element(tag, attributes.to_vec());
+                                token = self.t.next();
+                                continue;
+                            }
+                            "a" => {
+                                self.insert_element(tag, attributes.to_vec());
+                                token = self.t.next();
+                                continue;
+                            }
+                            _ => {
+                                token = self.t.next();
+                            }
+                        },
                         Some(HtmlToken::EndTag { ref tag }) => {
                             match tag.as_str() {
                                 "body" => {
@@ -422,7 +444,7 @@ impl HtmlParser {
                                         // Faile to parse the HTML. So, ignore the token.
                                         continue;
                                     }
-                                    self.pop_util(ElementKind::Body);
+                                    self.pop_until(ElementKind::Body);
                                     continue;
                                 }
                                 "html" => {
@@ -434,15 +456,41 @@ impl HtmlParser {
                                     }
                                     continue;
                                 }
+                                "p" => {
+                                    let element_kind = ElementKind::from_str(tag)
+                                        .expect("failed to convert string to ElementKind");
+                                    token = self.t.next();
+                                    self.pop_until(element_kind);
+                                    continue;
+                                }
+                                "h1" | "h2" => {
+                                    let element_kind = ElementKind::from_str(tag)
+                                        .expect("failed to convert string to ElementKind");
+                                    token = self.t.next();
+                                    self.pop_until(element_kind);
+                                    continue;
+                                }
+                                "a" => {
+                                    let element_kind = ElementKind::from_str(tag)
+                                        .expect("failed to convert string to ElementKind");
+                                    token = self.t.next();
+                                    self.pop_until(element_kind);
+                                    continue;
+                                }
                                 _ => {
                                     token = self.t.next();
                                 }
                             }
                         }
+                        Some(HtmlToken::Char(c)) => {
+                            // support text content.
+                            self.insert_char(c);
+                            token = self.t.next();
+                            continue;
+                        }
                         Some(HtmlToken::Eof) | None => {
                             return self.window.clone();
-                        }
-                        _ => {}
+                        } // _ => {}
                     }
                 }
 
@@ -456,13 +504,13 @@ impl HtmlParser {
                         }
                         Some(HtmlToken::EndTag { ref tag }) => {
                             if tag == "style" {
-                                self.pop_util(ElementKind::Style);
+                                self.pop_until(ElementKind::Style);
                                 self.mode = self.original_insertion_mode;
                                 token = self.t.next();
                                 continue;
                             }
                             if tag == "script" {
-                                self.pop_util(ElementKind::Script);
+                                self.pop_until(ElementKind::Script);
                                 self.mode = self.original_insertion_mode;
                                 token = self.t.next();
                                 continue;

@@ -10,7 +10,7 @@ use core::str::FromStr;
 // https:://dom.spec.whatwg.org/multipage/nav-history-apis.html#window
 #[derive(Debug, Clone)]
 pub struct Window {
-    pub document: Rc<RefCell<Node>>,
+    document: Rc<RefCell<Node>>,
 }
 
 impl Window {
@@ -41,6 +41,12 @@ pub struct Node {
     last_child: Weak<RefCell<Node>>,         // last child node
     previous_sibling: Weak<RefCell<Node>>,   // previous sibling node
     next_sibling: Option<Rc<RefCell<Node>>>, // next sibling node
+}
+
+impl PartialEq for Node {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind
+    }
 }
 
 impl Node {
@@ -124,12 +130,25 @@ pub enum NodeKind {
     /// https://dom.spec.whatwg.org/#interface-document
     Document,
     /// https://dom.spec.whatwg.org/#interface-element
-    Element(Element), // for example, <p>
+    Element(Element),
     /// https://dom.spec.whatwg.org/#interface-text
     Text(String),
 }
 
-// https://dom.spec.whatwg.org/#interface-element
+impl PartialEq for NodeKind {
+    fn eq(&self, other: &Self) -> bool {
+        match &self {
+            NodeKind::Document => matches!(other, NodeKind::Document),
+            NodeKind::Element(e1) => match &other {
+                NodeKind::Element(e2) => e1.kind == e2.kind,
+                _ => false,
+            },
+            NodeKind::Text(_) => matches!(other, NodeKind::Text(_)),
+        }
+    }
+}
+
+/// https://dom.spec.whatwg.org/#interface-element
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Element {
     kind: ElementKind,
@@ -150,7 +169,7 @@ impl Element {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 /// https://dom.spec.whatwg.org/#interface-element
 pub enum ElementKind {
     /// https://html.spec.whatwg.org/multipage/semantics.html#the-html-element

@@ -156,4 +156,220 @@ impl LayoutView {
             n.borrow_mut().compute_size(parent_size); // 2
         }
     }
+
+    fn calculate_node_position(
+        node: &Option<Rc<RefCell<LayoutObject>>>,
+        parent_point: LayoutPoint,
+        previous_sibiling_kind: LayoutObjectKind,
+        previous_sibling_point: Option<LayoutPoint>,
+        previous_sibling_size: Option<LayoutSize>,
+    ) {
+        if let Some(n) = node {
+            n.borrow_mut().compute_position(
+                parent_point,
+                previous_sibiling_kind,
+                previous_sibling_point,
+                previous_sibling_size,
+            );
+
+            // Calculate the position of the child node.
+            let first_child = n.borrow().first_child();
+            Self::calculate_node_position(
+                // 1
+                &first_child,
+                n.borrow().point(),
+                LayoutObjectKind::Block,
+                None,
+                None,
+            );
+
+            // Calculate the position of the sibling node.
+            let next_sibling = n.borrow().next_sibling();
+            Self::calculate_node_position(
+                &next_sibling,
+                parent_point,
+                n.borrow().kind(),
+                Some(n.borrow().point()),
+                Some(n.borrow().size()),
+            );
+        }
+    }
+
+    // p.283
+    fn paint_node(node: &Option<Rc<RefCell<LayoutObject>>>, display_items: &mut Vec<DisplayItem>) {
+        match node {
+            Some(n) => {
+                display_items.extend(n.borrow_mut().paint()); // 1
+
+                let first_child = n.borrow().first_child();
+                Self::paint_node(&first_child, display_items);
+
+                let next_sibling = n.borrow().next_sibling();
+                Self::paint_node(&next_sibling, display_items);
+            }
+            None => (),
+        }
+    }
+
+    pub fn paint(&self) -> Vec<DisplayItem> {
+        let mut display_items = Vec::new();
+
+        Self::paint_node(&self.root, &mut display_items);
+
+        display_items
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::alloc::string::ToString;
+    use crate::renderer::css::cssom::CssParser;
+    use crate::renderer::css::token::CssTokenizer;
+    use crate::renderer::dom::api::get_style_content;
+    use crate::renderer::dom::node::Element;
+    use crate::renderer::dom::node::NodeKind;
+    use crate::renderer::html::parser::HtmlParser;
+    use crate::renderer::html::token::HtmlTokenizer;
+    use alloc::string::String;
+    use alloc::vec::Vec;
+
+    fn create_layout_view(html: String) -> LayoutView {
+        let t = HtmlTokenizer::new(html);
+        let window = HtmlParser::new(t).construct_tree();
+        let dom = window.borrow().document();
+        let style = get_style_content(dom.clone());
+        let css_tokenizer = CssTokenizer::new(style);
+        let cssom = CssParser::new(css_tokenizer).parse_stylesheet();
+        LayoutView::new(dom, &cssom)
+    }
+
+    #[test]
+    fn test_empty() {
+        let layout_view = create_layout_view("".to_string());
+        assert_eq!(None, layout_view.root());
+    }
+
+    #[test]
+    fn test_body() {
+        let html = "<html><head></head><body></body></html>".to_string();
+        let layout_view = create_layout_view(html);
+
+        let root = layout_view.root();
+        assert!(root.is_some());
+        assert_eq!(
+            LayoutObjectKind::Block,
+            root.clone().expect("root should exist").borrow().kind()
+        );
+        assert_eq!(
+            NodeKind::Element(Element::new("body", Vec::new())),
+            root.clone()
+                .expect("root should exist")
+                .borrow()
+                .node_kind()
+        );
+    }
+
+    #[test]
+    fn test_text() {
+        let html = "<html><head></head><body>text</body></html>".to_string();
+        let layout_view = create_layout_view(html);
+
+        let root = layout_view.root();
+        assert!(root.is_some());
+        assert_eq!(
+            LayoutObjectKind::Block,
+            root.clone().expect("root should exist").borrow().kind()
+        );
+        assert_eq!(
+            NodeKind::Element(Element::new("body", Vec::new())),
+            root.clone()
+                .expect("root should exist")
+                .borrow()
+                .node_kind()
+        );
+
+        let text = root.expect("root should exist").borrow().first_child();
+        assert!(text.is_some());
+        assert_eq!(
+            LayoutObjectKind::Text,
+            text.clone()
+                .expect("text node should exist")
+                .borrow()
+                .kind()
+        );
+        assert_eq!(
+            NodeKind::Text("text".to_string()),
+            text.clone()
+                .expect("text node should exist")
+                .borrow()
+                .node_kind()
+        );
+    }
+
+    #[test]
+    fn test_display_none() {
+        let html = "<html><head><style>body{display:none;}</style></head><body>text</body></html>"
+            .to_string();
+        let layout_view = create_layout_view(html);
+
+        assert_eq!(None, layout_view.root());
+    }
+
+    #[test]
+    fn test_hidden_class() {
+        let html = r#"<html>
+<head>
+<style>
+  .hidden {
+    display: none;
+  }
+</style>
+</head>
+<body>
+  <a class="hidden">link1</a>
+  <p></p>
+  <p class="hidden"><a>link2</a></p>
+</body>
+</html>"#
+            .to_string();
+        let layout_view = create_layout_view(html);
+
+        let root = layout_view.root();
+        assert!(root.is_some());
+        assert_eq!(
+            LayoutObjectKind::Block,
+            root.clone().expect("root should exist").borrow().kind()
+        );
+        assert_eq!(
+            NodeKind::Element(Element::new("body", Vec::new())),
+            root.clone()
+                .expect("root should exist")
+                .borrow()
+                .node_kind()
+        );
+
+        let p = root.expect("root should exist").borrow().first_child();
+        assert!(p.is_some());
+        assert_eq!(
+            LayoutObjectKind::Block,
+            p.clone().expect("p node should exist").borrow().kind()
+        );
+        assert_eq!(
+            NodeKind::Element(Element::new("p", Vec::new())),
+            p.clone().expect("p node should exist").borrow().node_kind()
+        );
+
+        assert!(p
+            .clone()
+            .expect("p node should exist")
+            .borrow()
+            .first_child()
+            .is_none());
+        assert!(p
+            .expect("p node should exist")
+            .borrow()
+            .next_sibling()
+            .is_none());
+    }
 }

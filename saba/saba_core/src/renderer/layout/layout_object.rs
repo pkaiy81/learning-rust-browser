@@ -22,6 +22,32 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
+// Find the index of the space character closest to the specified index
+fn find_index_for_line_break(line: String, max_index: usize) -> usize {
+    for i in (0..max_index).rev() {
+        if line.chars().nth(i).unwrap() == ' ' {
+            return i;
+        }
+    }
+    max_index
+}
+
+// word-break: normal in CSS
+fn split_text(line: String, char_width: i64) -> Vec<String> {
+    let mut result: Vec<String> = vec![];
+    if line.len() as i64 * char_width > (WINDOW_WIDTH + WINDOW_PADDING) {
+        let s = line.split_at(find_index_for_line_break(
+            line.clone(),
+            ((WINDOW_WIDTH + WINDOW_PADDING) / char_width) as usize,
+        ));
+        result.push(s.0.to_string());
+        result.extend(split_text(s.1.trim().to_string(), char_width))
+    } else {
+        result.push(line);
+    }
+    result
+}
+
 pub fn create_layout_object(
     node: &Option<Rc<RefCell<Node>>>,
     parent_obj: &Option<Rc<RefCell<LayoutObject>>>,
@@ -106,16 +132,16 @@ impl LayoutObject {
         self.node.borrow().kind().clone()
     }
 
-    pub fn set_first_child(&mut self, first_child: Rc<RefCell<LayoutObject>>) {
-        self.first_child = Some(first_child);
+    pub fn set_first_child(&mut self, first_child: Option<Rc<RefCell<LayoutObject>>>) {
+        self.first_child = first_child;
     }
 
     pub fn first_child(&self) -> Option<Rc<RefCell<LayoutObject>>> {
         self.first_child.as_ref().cloned()
     }
 
-    pub fn set_next_sibling(&mut self, next_sibling: Rc<RefCell<LayoutObject>>) {
-        self.next_sibling = Some(next_sibling);
+    pub fn set_next_sibling(&mut self, next_sibling: Option<Rc<RefCell<LayoutObject>>>) {
+        self.next_sibling = next_sibling;
     }
 
     pub fn next_sibling(&self) -> Option<Rc<RefCell<LayoutObject>>> {
@@ -329,6 +355,115 @@ impl LayoutObject {
         }
 
         self.size = size;
+    }
+
+    // p.275
+    pub fn compute_position(
+        &mut self,
+        parent_point: LayoutPoint,
+        previous_sibling_kind: LayoutObjectKind,
+        previous_sibling_point: Option<LayoutPoint>,
+        previous_sibling_size: Option<LayoutSize>,
+    ) {
+        let mut point = LayoutPoint::new(0, 0);
+
+        match (self.kind(), previous_sibling_kind) {
+            // 1
+            // If the block element is a sibling node, then forward in the Y-axis direction
+            (LayoutObjectKind::Block, _) | (_, LayoutObjectKind::Block) => {
+                if let (Some(size), Some(pos)) = (previous_sibling_size, previous_sibling_point) {
+                    // 2
+                    point.set_y(pos.y() + size.height());
+                } else {
+                    point.set_y(parent_point.y()); // 3
+                }
+                point.set_x(parent_point.x()); // 4
+            }
+            // If the inline element is a sibling node, then forward in the X-axis direction
+            (LayoutObjectKind::Inline, LayoutObjectKind::Inline) => {
+                // 5
+                if let (Some(size), Some(pos)) = (previous_sibling_size, previous_sibling_point) {
+                    point.set_x(pos.x() + size.width()); // 6
+                    point.set_y(pos.y()); // 7
+                } else {
+                    point.set_x(parent_point.x()); // 8
+                    point.set_y(parent_point.y());
+                }
+            }
+            _ => {
+                // 9
+                point.set_x(parent_point.x());
+                point.set_y(parent_point.y());
+            }
+        }
+
+        self.point = point;
+    }
+
+    // p.285
+    pub fn paint(&mut self) -> Vec<DisplayItem> {
+        if self.style.display() == DisplayType::DisplayNone {
+            return vec![];
+        }
+
+        match self.kind {
+            LayoutObjectKind::Block => {
+                // (d1)
+                if let NodeKind::Element(_e) = self.node_kind() {
+                    return vec![DisplayItem::Rect {
+                        style: self.style(),
+                        layout_point: self.point(),
+                        layout_size: self.size(),
+                    }];
+                }
+            }
+            LayoutObjectKind::Inline => { // (d2)
+                 // In the browser in this book, there are no inline elements to draw.
+                 // If you support <img> tags, process them here.
+            }
+            LayoutObjectKind::Text => {
+                // (d3)
+                if let NodeKind::Text(t) = self.node_kind() {
+                    let mut v = vec![];
+
+                    let ratio = match self.style.font_size() {
+                        FontSize::Medium => 1,
+                        FontSize::XLarge => 2,
+                        FontSize::XXLarge => 3,
+                    };
+                    let plain_text = t
+                        .replace("\n", " ")
+                        .split(' ')
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    let lines = split_text(plain_text, CHAR_WIDTH * ratio);
+                    let mut i = 0;
+                    for line in lines {
+                        let item = DisplayItem::Text {
+                            text: line,
+                            style: self.style(),
+                            layout_point: LayoutPoint::new(
+                                self.point().x(),
+                                self.point().y() + CHAR_HEIGHT_WITH_PADDING * i,
+                            ),
+                        };
+                        v.push(item);
+                        i += 1;
+                    }
+
+                    return v;
+                }
+            }
+        }
+
+        vec![]
+    }
+}
+
+impl PartialEq for LayoutObject {
+    fn eq(&self, other: &Self) -> bool {
+        self.node == other.node
     }
 }
 

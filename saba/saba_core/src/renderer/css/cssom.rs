@@ -4,7 +4,6 @@ use crate::renderer::css::token::CssTokenizer;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::iter::Peekable;
-use core::panic;
 
 #[derive(Debug, Clone)]
 pub struct CssParser {
@@ -26,6 +25,7 @@ impl CssParser {
         sheet
     }
 
+    /// https://www.w3.org/TR/css-syntax-3/#consume-a-list-of-rules
     fn consume_list_of_rules(&mut self) -> Vec<QualifiedRule> {
         // create a empty vector
         let mut rules = Vec::new();
@@ -117,6 +117,7 @@ impl CssParser {
         }
     }
 
+    /// https://www.w3.org/TR/css-syntax-3/#consume-a-list-of-declarations
     fn consume_list_of_declarations(&mut self) -> Vec<Declaration> {
         let mut declatations = Vec::new();
 
@@ -147,6 +148,7 @@ impl CssParser {
         }
     }
 
+    /// https://www.w3.org/TR/css-syntax-3/#consume-a-declaration
     fn consume_declaration(&mut self) -> Option<Declaration> {
         if self.t.peek().is_none() {
             return None;
@@ -198,7 +200,7 @@ impl CssParser {
 // https://www.w3.org/TR/cssom-1/#cssstylesheet
 #[derive(Debug, Clone, PartialEq)]
 pub struct StyleSheet {
-    /// https://www.w3.org/TR/cssom/#dom-cssstylesheet-cssrules
+    /// https://drafts.csswg.org/cssom/#dom-cssstylesheet-cssrules
     pub rules: Vec<QualifiedRule>,
 }
 

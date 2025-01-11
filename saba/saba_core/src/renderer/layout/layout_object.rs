@@ -23,9 +23,10 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 
 // Find the index of the space character closest to the specified index
+/// https://drafts.csswg.org/css-text/#word-break-property
 fn find_index_for_line_break(line: String, max_index: usize) -> usize {
     for i in (0..max_index).rev() {
-        if line.chars().nth(i).unwrap() == ' ' {
+        if line.chars().collect::<Vec<char>>()[i] == ' ' {
             return i;
         }
     }
@@ -33,6 +34,7 @@ fn find_index_for_line_break(line: String, max_index: usize) -> usize {
 }
 
 // word-break: normal in CSS
+/// https://drafts.csswg.org/css-text/#word-break-property
 fn split_text(line: String, char_width: i64) -> Vec<String> {
     let mut result: Vec<String> = vec![];
     if line.len() as i64 * char_width > (WINDOW_WIDTH + WINDOW_PADDING) {

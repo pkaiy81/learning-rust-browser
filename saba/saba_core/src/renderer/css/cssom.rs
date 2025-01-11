@@ -38,12 +38,12 @@ impl CssParser {
             match token {
                 // If an AtKeyword token appears, it indicates the start of a rule, such as @import for other CSS imports, @media for media queries, etc.
                 CssToken::AtKeyword(_keyword) => {
-                    let _rule = self.consume_qualifed_rule();
+                    let _rule = self.consume_qualified_rule();
                     // Ignore the rule for now because we are not supporting @import, @media, etc.
                 }
                 _ => {
                     // resolve one rule and add vector
-                    let rule = self.consume_qualifed_rule();
+                    let rule = self.consume_qualified_rule();
                     match rule {
                         Some(r) => rules.push(r),
                         None => return rules,
@@ -53,7 +53,10 @@ impl CssParser {
         }
     }
 
-    fn consume_qualifed_rule(&mut self) -> Option<QualifiedRule> {
+    /// https://www.w3.org/TR/css-syntax-3/#consume-qualified-rule
+    /// https://www.w3.org/TR/css-syntax-3/#qualified-rule
+    /// https://www.w3.org/TR/css-syntax-3/#style-rules
+    fn consume_qualified_rule(&mut self) -> Option<QualifiedRule> {
         let mut rule = QualifiedRule::new();
 
         loop {
@@ -87,7 +90,7 @@ impl CssParser {
                 if delim == '.' {
                     return Selector::ClassSelector(self.consume_ident());
                 }
-                panic!("Parse error: {:?} is an unexpected token", token);
+                panic!("Parse error: {:?} is an unexpected token.", token);
             }
             CssToken::Ident(ident) => {
                 // Selectors like a:hover are treated as tag name selectors,
@@ -178,7 +181,7 @@ impl CssParser {
         match token {
             CssToken::Ident(ref ident) => ident.to_string(),
             _ => {
-                panic!("Parse error: {:?} is an unexpected token", token);
+                panic!("Parse error: {:?} is an unexpected token.", token);
             }
         }
     }

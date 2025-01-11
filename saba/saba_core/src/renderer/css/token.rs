@@ -105,7 +105,6 @@ impl CssTokenizer {
         loop {
             self.pos += 1;
             let c = self.input[self.pos];
-
             match c {
                 'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => {
                     s.push(c);

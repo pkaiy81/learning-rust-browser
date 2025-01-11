@@ -63,6 +63,8 @@ impl CssTokenizer {
         s
     }
 
+    /// https://www.w3.org/TR/css-syntax-3/#consume-number
+    /// https://www.w3.org/TR/css-syntax-3/#consume-a-numeric-token
     fn consume_numeric_token(&mut self) -> f64 {
         let mut num = 0f64;
         let mut floating = false;
@@ -169,8 +171,8 @@ impl Iterator for CssTokenizer {
                     // If the next three characters are valid string token, create the <at-keyword-token> and return it.
                     // Otherwise, return <delim-token>
                     if self.input[self.pos + 1].is_ascii_alphabetic()
-                        && self.input[self.pos + 2].is_ascii_alphanumeric()
-                        && self.input[self.pos + 3].is_ascii_alphanumeric()
+                        && self.input[self.pos + 2].is_alphanumeric()
+                        && self.input[self.pos + 3].is_alphanumeric()
                     {
                         // skip @
                         self.pos += 1;

@@ -121,22 +121,6 @@ impl LayoutView {
         tree
     }
 
-    pub fn root(&self) -> Option<Rc<RefCell<LayoutObject>>> {
-        self.root.clone()
-    }
-
-    fn update_layout(&mut self) {
-        Self::calculate_node_size(&self.root, LayoutSize::new(CONTENT_AREA_WIDTH, 0));
-
-        Self::calculate_node_position(
-            &self.root,
-            LayoutPoint::new(0, 0),
-            LayoutObjectKind::Block,
-            None,
-            None,
-        );
-    }
-
     fn calculate_node_size(node: &Option<Rc<RefCell<LayoutObject>>>, parent_size: LayoutSize) {
         if let Some(n) = node {
             // If the node is a block element, determine width before calculating the layout of child node.
@@ -160,14 +144,14 @@ impl LayoutView {
     fn calculate_node_position(
         node: &Option<Rc<RefCell<LayoutObject>>>,
         parent_point: LayoutPoint,
-        previous_sibiling_kind: LayoutObjectKind,
+        previous_sibling_kind: LayoutObjectKind,
         previous_sibling_point: Option<LayoutPoint>,
         previous_sibling_size: Option<LayoutSize>,
     ) {
         if let Some(n) = node {
             n.borrow_mut().compute_position(
                 parent_point,
-                previous_sibiling_kind,
+                previous_sibling_kind,
                 previous_sibling_point,
                 previous_sibling_size,
             );
@@ -195,6 +179,18 @@ impl LayoutView {
         }
     }
 
+    fn update_layout(&mut self) {
+        Self::calculate_node_size(&self.root, LayoutSize::new(CONTENT_AREA_WIDTH, 0));
+
+        Self::calculate_node_position(
+            &self.root,
+            LayoutPoint::new(0, 0),
+            LayoutObjectKind::Block,
+            None,
+            None,
+        );
+    }
+
     // p.283
     fn paint_node(node: &Option<Rc<RefCell<LayoutObject>>>, display_items: &mut Vec<DisplayItem>) {
         match node {
@@ -217,6 +213,10 @@ impl LayoutView {
         Self::paint_node(&self.root, &mut display_items);
 
         display_items
+    }
+
+    pub fn root(&self) -> Option<Rc<RefCell<LayoutObject>>> {
+        self.root.clone()
     }
 }
 

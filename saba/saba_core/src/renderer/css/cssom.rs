@@ -15,64 +15,79 @@ impl CssParser {
         Self { t: t.peekable() }
     }
 
-    /// https://www.w3.org/TR/css-syntax-3/#parse-stylesheet
-    pub fn parse_stylesheet(&mut self) -> StyleSheet {
-        // Create a new CSSStyleSheet instance
-        let mut sheet = StyleSheet::new();
-
-        // Create list of rules from the token stream and assign it to the CSSStyleSheet field
-        sheet.set_rules(self.consume_list_of_rules());
-        sheet
+    /// https://www.w3.org/TR/css-syntax-3/#consume-component-value
+    fn consume_component_value(&mut self) -> ComponentValue {
+        self.t
+            .next()
+            .expect("should have a token in consume_component_value")
     }
 
-    /// https://www.w3.org/TR/css-syntax-3/#consume-a-list-of-rules
-    fn consume_list_of_rules(&mut self) -> Vec<QualifiedRule> {
-        // create a empty vector
-        let mut rules = Vec::new();
+    fn consume_ident(&mut self) -> String {
+        let token = match self.t.next() {
+            Some(t) => t,
+            None => panic!("should have a token but got None"),
+        };
 
-        loop {
-            let token = match self.t.peek() {
-                Some(t) => t,
-                None => return rules,
-            };
-            match token {
-                // If an AtKeyword token appears, it indicates the start of a rule, such as @import for other CSS imports, @media for media queries, etc.
-                CssToken::AtKeyword(_keyword) => {
-                    let _rule = self.consume_qualified_rule();
-                    // Ignore the rule for now because we are not supporting @import, @media, etc.
-                }
-                _ => {
-                    // resolve one rule and add vector
-                    let rule = self.consume_qualified_rule();
-                    match rule {
-                        Some(r) => rules.push(r),
-                        None => return rules,
-                    }
-                }
+        match token {
+            CssToken::Ident(ref ident) => ident.to_string(),
+            _ => {
+                panic!("Parse error: {:?} is an unexpected token.", token);
             }
         }
     }
 
-    /// https://www.w3.org/TR/css-syntax-3/#consume-qualified-rule
-    /// https://www.w3.org/TR/css-syntax-3/#qualified-rule
-    /// https://www.w3.org/TR/css-syntax-3/#style-rules
-    fn consume_qualified_rule(&mut self) -> Option<QualifiedRule> {
-        let mut rule = QualifiedRule::new();
+    /// https://www.w3.org/TR/css-syntax-3/#consume-a-declaration
+    fn consume_declaration(&mut self) -> Option<Declaration> {
+        if self.t.peek().is_none() {
+            return None;
+        }
+
+        // Initialize the declaration structure
+        let mut declaration = Declaration::new();
+        // Set the identifier to the property of Declaration structure
+        declaration.set_property(self.consume_ident());
+        // If the next token is not a colon, it is a parse error.
+        // Return None
+        match self.t.next() {
+            Some(token) => match token {
+                CssToken::Colon => {}
+                _ => return None,
+            },
+            None => return None,
+        }
+
+        // Set the value to the value of the Declaration structure
+        declaration.set_value(self.consume_component_value());
+
+        Some(declaration)
+    }
+
+    /// https://www.w3.org/TR/css-syntax-3/#consume-a-list-of-declarations
+    fn consume_list_of_declarations(&mut self) -> Vec<Declaration> {
+        let mut declarations = Vec::new();
 
         loop {
             let token = match self.t.peek() {
                 Some(t) => t,
-                None => return None,
+                None => return declarations,
             };
 
             match token {
-                CssToken::OpenCurly => {
-                    assert_eq!(self.t.next(), Some(CssToken::OpenCurly));
-                    rule.set_declarations(self.consume_list_of_declarations());
-                    return Some(rule);
+                CssToken::CloseCurly => {
+                    assert_eq!(self.t.next(), Some(CssToken::CloseCurly));
+                    return declarations;
+                }
+                CssToken::SemiColon => {
+                    assert_eq!(self.t.next(), Some(CssToken::SemiColon));
+                    // One declaration ends. Action is not required.
+                }
+                CssToken::Ident(ref _ident) => {
+                    if let Some(declaration) = self.consume_declaration() {
+                        declarations.push(declaration);
+                    }
                 }
                 _ => {
-                    rule.set_selector(self.consume_selector());
+                    self.t.next();
                 }
             }
         }
@@ -117,82 +132,67 @@ impl CssParser {
         }
     }
 
-    /// https://www.w3.org/TR/css-syntax-3/#consume-a-list-of-declarations
-    fn consume_list_of_declarations(&mut self) -> Vec<Declaration> {
-        let mut declatations = Vec::new();
+    /// https://www.w3.org/TR/css-syntax-3/#consume-qualified-rule
+    /// https://www.w3.org/TR/css-syntax-3/#qualified-rule
+    /// https://www.w3.org/TR/css-syntax-3/#style-rules
+    fn consume_qualified_rule(&mut self) -> Option<QualifiedRule> {
+        let mut rule = QualifiedRule::new();
 
         loop {
             let token = match self.t.peek() {
                 Some(t) => t,
-                None => return declatations,
+                None => return None,
             };
 
             match token {
-                CssToken::CloseCurly => {
-                    assert_eq!(self.t.next(), Some(CssToken::CloseCurly));
-                    return declatations;
-                }
-                CssToken::SemiColon => {
-                    assert_eq!(self.t.next(), Some(CssToken::SemiColon));
-                    // One declaration ends. Action is not required.
-                }
-                CssToken::Ident(ref _ident) => {
-                    if let Some(declaration) = self.consume_declaration() {
-                        declatations.push(declaration);
-                    }
+                CssToken::OpenCurly => {
+                    assert_eq!(self.t.next(), Some(CssToken::OpenCurly));
+                    rule.set_declarations(self.consume_list_of_declarations());
+                    return Some(rule);
                 }
                 _ => {
-                    self.t.next();
+                    rule.set_selector(self.consume_selector());
                 }
             }
         }
     }
 
-    /// https://www.w3.org/TR/css-syntax-3/#consume-a-declaration
-    fn consume_declaration(&mut self) -> Option<Declaration> {
-        if self.t.peek().is_none() {
-            return None;
-        }
+    /// https://www.w3.org/TR/css-syntax-3/#consume-a-list-of-rules
+    fn consume_list_of_rules(&mut self) -> Vec<QualifiedRule> {
+        // create a empty vector
+        let mut rules = Vec::new();
 
-        // Initialize the declaration structure
-        let mut declaration = Declaration::new();
-        // Set the identifier to the property of Declaration structure
-        declaration.set_property(self.consume_ident());
-        // If the next token is not a colon, it is a parse error.
-        // Return None
-        match self.t.next() {
-            Some(token) => match token {
-                CssToken::Colon => {}
-                _ => return None,
-            },
-            None => return None,
-        }
-
-        // Set the value to the value of the Declaration structure
-        declaration.set_value(self.consume_component_value());
-
-        Some(declaration)
-    }
-
-    fn consume_ident(&mut self) -> String {
-        let token = match self.t.next() {
-            Some(t) => t,
-            None => panic!("should have a token but got None"),
-        };
-
-        match token {
-            CssToken::Ident(ref ident) => ident.to_string(),
-            _ => {
-                panic!("Parse error: {:?} is an unexpected token.", token);
+        loop {
+            let token = match self.t.peek() {
+                Some(t) => t,
+                None => return rules,
+            };
+            match token {
+                // If an AtKeyword token appears, it indicates the start of a rule, such as @import for other CSS imports, @media for media queries, etc.
+                CssToken::AtKeyword(_keyword) => {
+                    let _rule = self.consume_qualified_rule();
+                    // Ignore the rule for now because we are not supporting @import, @media, etc.
+                }
+                _ => {
+                    // resolve one rule and add vector
+                    let rule = self.consume_qualified_rule();
+                    match rule {
+                        Some(r) => rules.push(r),
+                        None => return rules,
+                    }
+                }
             }
         }
     }
 
-    /// https://www.w3.org/TR/css-syntax-3/#consume-component-value
-    fn consume_component_value(&mut self) -> ComponentValue {
-        self.t
-            .next()
-            .expect("should have a token in consume_component_value")
+    /// https://www.w3.org/TR/css-syntax-3/#parse-stylesheet
+    pub fn parse_stylesheet(&mut self) -> StyleSheet {
+        // Create a new CSSStyleSheet instance
+        let mut sheet = StyleSheet::new();
+
+        // Create list of rules from the token stream and assign it to the CSSStyleSheet field
+        sheet.set_rules(self.consume_list_of_rules());
+        sheet
     }
 }
 

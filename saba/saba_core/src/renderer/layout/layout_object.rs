@@ -107,6 +107,12 @@ pub struct LayoutObject {
     size: LayoutSize,
 }
 
+impl PartialEq for LayoutObject {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind
+    }
+}
+
 impl LayoutObject {
     pub fn new(node: Rc<RefCell<Node>>, parent_obj: &Option<Rc<RefCell<LayoutObject>>>) -> Self {
         let parent = match parent_obj {
@@ -126,153 +132,64 @@ impl LayoutObject {
         }
     }
 
-    pub fn kind(&self) -> LayoutObjectKind {
-        self.kind
-    }
-
-    pub fn node_kind(&self) -> NodeKind {
-        self.node.borrow().kind().clone()
-    }
-
-    pub fn set_first_child(&mut self, first_child: Option<Rc<RefCell<LayoutObject>>>) {
-        self.first_child = first_child;
-    }
-
-    pub fn first_child(&self) -> Option<Rc<RefCell<LayoutObject>>> {
-        self.first_child.as_ref().cloned()
-    }
-
-    pub fn set_next_sibling(&mut self, next_sibling: Option<Rc<RefCell<LayoutObject>>>) {
-        self.next_sibling = next_sibling;
-    }
-
-    pub fn next_sibling(&self) -> Option<Rc<RefCell<LayoutObject>>> {
-        self.next_sibling.as_ref().cloned()
-    }
-
-    pub fn parent(&self) -> Weak<RefCell<Self>> {
-        self.parent.clone()
-    }
-
-    pub fn style(&self) -> ComputedStyle {
-        self.style.clone()
-    }
-
-    pub fn point(&self) -> LayoutPoint {
-        self.point
-    }
-
-    pub fn size(&self) -> LayoutSize {
-        self.size
-    }
-
-    pub fn is_node_selected(&self, selector: &Selector) -> bool {
-        match &self.node_kind() {
-            NodeKind::Element(e) => match selector {
-                Selector::TypeSelector(type_name) => {
-                    if e.kind().to_string() == *type_name {
-                        return true;
-                    }
-                    false
-                }
-                Selector::ClassSelector(class_name) => {
-                    for attr in &e.attributes() {
-                        if attr.name() == "class" && attr.value() == *class_name {
-                            return true;
-                        }
-                    }
-                    false
-                }
-                Selector::IdSelector(id_name) => {
-                    for attr in &e.attributes() {
-                        if attr.name() == "id" && attr.value() == *id_name {
-                            return true;
-                        }
-                    }
-                    false
-                }
-                Selector::UnknownSelector => false,
-            },
-            _ => false,
+    // p.285
+    pub fn paint(&mut self) -> Vec<DisplayItem> {
+        if self.style.display() == DisplayType::DisplayNone {
+            return vec![];
         }
-    }
 
-    pub fn cascading_style(&mut self, declarations: Vec<Declaration>) {
-        for declaration in declarations {
-            match declaration.property.as_str() {
-                "background-color" => {
-                    if let ComponentValue::Ident(value) = &declaration.value {
-                        let color = match Color::from_name(&value) {
-                            Ok(color) => color,
-                            Err(_) => Color::white(),
-                        };
-                        self.style.set_background_color(color);
-                        continue;
-                    }
-
-                    if let ComponentValue::HashToken(color_code) = &declaration.value {
-                        let color = match Color::from_code(&color_code) {
-                            Ok(color) => color,
-                            Err(_) => Color::white(),
-                        };
-                        self.style.set_background_color(color);
-                        continue;
-                    }
-                }
-                "color" => {
-                    if let ComponentValue::Ident(value) = &declaration.value {
-                        let color = match Color::from_name(&value) {
-                            Ok(color) => color,
-                            Err(_) => Color::black(),
-                        };
-                        self.style.set_color(color);
-                    }
-
-                    if let ComponentValue::HashToken(color_code) = &declaration.value {
-                        let color = match Color::from_code(&color_code) {
-                            Ok(color) => color,
-                            Err(_) => Color::black(),
-                        };
-                        self.style.set_color(color);
-                    }
-                }
-                "display" => {
-                    if let ComponentValue::Ident(value) = declaration.value {
-                        let display_type = match DisplayType::from_str(&value) {
-                            Ok(display_type) => display_type,
-                            Err(_) => DisplayType::DisplayNone,
-                        };
-                        self.style.set_display(display_type)
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    pub fn defaulting_style(
-        &mut self,
-        node: &Rc<RefCell<Node>>,
-        parent_style: Option<ComputedStyle>,
-    ) {
-        self.style.defaulting(node, parent_style);
-    }
-
-    pub fn update_kind(&mut self) {
-        match self.node_kind() {
-            NodeKind::Document => panic!("should not create a layout object for a document node"),
-            NodeKind::Element(_) => {
-                let display = self.style.display();
-                match display {
-                    DisplayType::Block => self.kind = LayoutObjectKind::Block,
-                    DisplayType::Inline => self.kind = LayoutObjectKind::Inline,
-                    DisplayType::DisplayNone => {
-                        panic!("should not create a layout object for a node with display:none")
-                    }
+        match self.kind {
+            LayoutObjectKind::Block => {
+                // (d1)
+                if let NodeKind::Element(_e) = self.node_kind() {
+                    return vec![DisplayItem::Rect {
+                        style: self.style(),
+                        layout_point: self.point(),
+                        layout_size: self.size(),
+                    }];
                 }
             }
-            NodeKind::Text(_) => self.kind = LayoutObjectKind::Text,
+            LayoutObjectKind::Inline => { // (d2)
+                 // In the browser in this book, there are no inline elements to draw.
+                 // If you support <img> tags, process them here.
+            }
+            LayoutObjectKind::Text => {
+                // (d3)
+                if let NodeKind::Text(t) = self.node_kind() {
+                    let mut v = vec![];
+
+                    let ratio = match self.style.font_size() {
+                        FontSize::Medium => 1,
+                        FontSize::XLarge => 2,
+                        FontSize::XXLarge => 3,
+                    };
+                    let plain_text = t
+                        .replace("\n", " ")
+                        .split(' ')
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    let lines = split_text(plain_text, CHAR_WIDTH * ratio);
+                    let mut i = 0;
+                    for line in lines {
+                        let item = DisplayItem::Text {
+                            text: line,
+                            style: self.style(),
+                            layout_point: LayoutPoint::new(
+                                self.point().x(),
+                                self.point().y() + CHAR_HEIGHT_WITH_PADDING * i,
+                            ),
+                        };
+                        v.push(item);
+                        i += 1;
+                    }
+
+                    return v;
+                }
+            }
         }
+
+        vec![]
     }
 
     // p272
@@ -402,77 +319,160 @@ impl LayoutObject {
         self.point = point;
     }
 
-    // p.285
-    pub fn paint(&mut self) -> Vec<DisplayItem> {
-        if self.style.display() == DisplayType::DisplayNone {
-            return vec![];
-        }
-
-        match self.kind {
-            LayoutObjectKind::Block => {
-                // (d1)
-                if let NodeKind::Element(_e) = self.node_kind() {
-                    return vec![DisplayItem::Rect {
-                        style: self.style(),
-                        layout_point: self.point(),
-                        layout_size: self.size(),
-                    }];
+    pub fn is_node_selected(&self, selector: &Selector) -> bool {
+        match &self.node_kind() {
+            NodeKind::Element(e) => match selector {
+                Selector::TypeSelector(type_name) => {
+                    if e.kind().to_string() == *type_name {
+                        return true;
+                    }
+                    false
                 }
-            }
-            LayoutObjectKind::Inline => { // (d2)
-                 // In the browser in this book, there are no inline elements to draw.
-                 // If you support <img> tags, process them here.
-            }
-            LayoutObjectKind::Text => {
-                // (d3)
-                if let NodeKind::Text(t) = self.node_kind() {
-                    let mut v = vec![];
+                Selector::ClassSelector(class_name) => {
+                    for attr in &e.attributes() {
+                        if attr.name() == "class" && attr.value() == *class_name {
+                            return true;
+                        }
+                    }
+                    false
+                }
+                Selector::IdSelector(id_name) => {
+                    for attr in &e.attributes() {
+                        if attr.name() == "id" && attr.value() == *id_name {
+                            return true;
+                        }
+                    }
+                    false
+                }
+                Selector::UnknownSelector => false,
+            },
+            _ => false,
+        }
+    }
 
-                    let ratio = match self.style.font_size() {
-                        FontSize::Medium => 1,
-                        FontSize::XLarge => 2,
-                        FontSize::XXLarge => 3,
-                    };
-                    let plain_text = t
-                        .replace("\n", " ")
-                        .split(' ')
-                        .filter(|s| !s.is_empty())
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    let lines = split_text(plain_text, CHAR_WIDTH * ratio);
-                    let mut i = 0;
-                    for line in lines {
-                        let item = DisplayItem::Text {
-                            text: line,
-                            style: self.style(),
-                            layout_point: LayoutPoint::new(
-                                self.point().x(),
-                                self.point().y() + CHAR_HEIGHT_WITH_PADDING * i,
-                            ),
+    pub fn cascading_style(&mut self, declarations: Vec<Declaration>) {
+        for declaration in declarations {
+            match declaration.property.as_str() {
+                "background-color" => {
+                    if let ComponentValue::Ident(value) = &declaration.value {
+                        let color = match Color::from_name(&value) {
+                            Ok(color) => color,
+                            Err(_) => Color::white(),
                         };
-                        v.push(item);
-                        i += 1;
+                        self.style.set_background_color(color);
+                        continue;
                     }
 
-                    return v;
+                    if let ComponentValue::HashToken(color_code) = &declaration.value {
+                        let color = match Color::from_code(&color_code) {
+                            Ok(color) => color,
+                            Err(_) => Color::white(),
+                        };
+                        self.style.set_background_color(color);
+                        continue;
+                    }
                 }
+                "color" => {
+                    if let ComponentValue::Ident(value) = &declaration.value {
+                        let color = match Color::from_name(&value) {
+                            Ok(color) => color,
+                            Err(_) => Color::black(),
+                        };
+                        self.style.set_color(color);
+                    }
+
+                    if let ComponentValue::HashToken(color_code) = &declaration.value {
+                        let color = match Color::from_code(&color_code) {
+                            Ok(color) => color,
+                            Err(_) => Color::black(),
+                        };
+                        self.style.set_color(color);
+                    }
+                }
+                "display" => {
+                    if let ComponentValue::Ident(value) = declaration.value {
+                        let display_type = match DisplayType::from_str(&value) {
+                            Ok(display_type) => display_type,
+                            Err(_) => DisplayType::DisplayNone,
+                        };
+                        self.style.set_display(display_type)
+                    }
+                }
+                _ => {}
             }
         }
-
-        vec![]
     }
-}
 
-impl PartialEq for LayoutObject {
-    fn eq(&self, other: &Self) -> bool {
-        self.node == other.node
+    pub fn defaulting_style(
+        &mut self,
+        node: &Rc<RefCell<Node>>,
+        parent_style: Option<ComputedStyle>,
+    ) {
+        self.style.defaulting(node, parent_style);
+    }
+
+    pub fn update_kind(&mut self) {
+        match self.node_kind() {
+            NodeKind::Document => panic!("should not create a layout object for a document node"),
+            NodeKind::Element(_) => {
+                let display = self.style.display();
+                match display {
+                    DisplayType::Block => self.kind = LayoutObjectKind::Block,
+                    DisplayType::Inline => self.kind = LayoutObjectKind::Inline,
+                    DisplayType::DisplayNone => {
+                        panic!("should not create a layout object for a node with display:none")
+                    }
+                }
+            }
+            NodeKind::Text(_) => self.kind = LayoutObjectKind::Text,
+        }
+    }
+
+    pub fn kind(&self) -> LayoutObjectKind {
+        self.kind
+    }
+
+    pub fn node_kind(&self) -> NodeKind {
+        self.node.borrow().kind().clone()
+    }
+
+    pub fn set_first_child(&mut self, first_child: Option<Rc<RefCell<LayoutObject>>>) {
+        self.first_child = first_child;
+    }
+
+    pub fn first_child(&self) -> Option<Rc<RefCell<LayoutObject>>> {
+        self.first_child.as_ref().cloned()
+    }
+
+    pub fn set_next_sibling(&mut self, next_sibling: Option<Rc<RefCell<LayoutObject>>>) {
+        self.next_sibling = next_sibling;
+    }
+
+    pub fn next_sibling(&self) -> Option<Rc<RefCell<LayoutObject>>> {
+        self.next_sibling.as_ref().cloned()
+    }
+
+    pub fn parent(&self) -> Weak<RefCell<Self>> {
+        self.parent.clone()
+    }
+
+    pub fn style(&self) -> ComputedStyle {
+        self.style.clone()
+    }
+
+    pub fn point(&self) -> LayoutPoint {
+        self.point
+    }
+
+    pub fn size(&self) -> LayoutSize {
+        self.size
     }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct LayoutPoint {
-    pub x: i64,
-    pub y: i64,
+    x: i64,
+    y: i64,
 }
 
 impl LayoutPoint {
@@ -499,8 +499,8 @@ impl LayoutPoint {
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct LayoutSize {
-    pub width: i64,
-    pub height: i64,
+    width: i64,
+    height: i64,
 }
 
 impl LayoutSize {

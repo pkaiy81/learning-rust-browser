@@ -48,66 +48,15 @@ impl HtmlParser {
         }
     }
 
-    fn create_element(&self, tag: &str, attributes: Vec<Attribute>) -> Node {
-        Node::new(NodeKind::Element(Element::new(tag, attributes)))
-    }
-
-    // insert_element adds a new element to the DOM tree.
-    // 1. Get the last element from the stack of open elements. This node called "current".
-    // 2. If the stack is empty, root element is current.
-    // 3. Create a new node and store it to the node variable formatted as RC<RefCell<Node>> to wrap the node.
-    // 4/5/6. If the current node has already a child node, then add the new node to the last child node after finding the brother node.
-    // 7/8. If the brother node is not found, then set the new node as the first child node of the current node.
-    // 9. Set the new node as the last child node of the current node.
-    // 10. Set the parent node of the new node as the current node.
-    //     These steps are necessary to prevent the circular reference.(Rc::downgrade)
-    // 11. Lastly, push the new node to the stack of open elements.
-    // ref. https://html.spec.whatwg.org/multipage/parsing.html#insert-a-foreign-element
-    fn insert_element(&mut self, tag: &str, attributes: Vec<Attribute>) {
-        let window = self.window.borrow();
-        let current = match self.stack_of_open_elements.last() {
-            // 1
-            Some(n) => n.clone(),
-            None => window.document(), // 2
-        };
-        let node = Rc::new(RefCell::new(self.create_element(tag, attributes))); // 3
-
-        if current.borrow().first_child().is_some() {
-            // 4
-            let mut last_sibiling = current.borrow().first_child();
-            loop {
-                // 5
-                last_sibiling = match last_sibiling {
-                    Some(ref node) => {
-                        if node.borrow().next_sibling().is_some() {
-                            node.borrow().next_sibling()
-                        } else {
-                            break;
-                        }
-                    }
-                    None => unimplemented!("last_sibiling should be Some."),
-                }
+    // contain_in_stack checks if the specified element is in the stack of open elements.
+    fn contain_in_stack(&mut self, element_kind: ElementKind) -> bool {
+        for i in 0..self.stack_of_open_elements.len() {
+            if self.stack_of_open_elements[i].borrow().element_kind() == Some(element_kind) {
+                return true;
             }
-
-            last_sibiling
-                .unwrap()
-                .borrow_mut()
-                .set_next_sibling(Some(node.clone())); // 6
-            node.borrow_mut().set_previous_sibling(Rc::downgrade(
-                &current
-                    .borrow()
-                    .first_child()
-                    .expect("failed to get a first child."),
-            ))
-        } else {
-            // 7
-            current.borrow_mut().set_first_child(Some(node.clone())); // 8
         }
 
-        current.borrow_mut().set_last_child(Rc::downgrade(&node)); // 9
-        node.borrow_mut().set_parent(Rc::downgrade(&current)); // 10
-
-        self.stack_of_open_elements.push(node); // 11
+        false
     }
 
     // pop_until pops the element from the stack of open elements until the element is found.
@@ -132,24 +81,13 @@ impl HtmlParser {
 
     fn pop_current_node(&mut self, element_kind: ElementKind) -> bool {
         let current = match self.stack_of_open_elements.last() {
-            Some(n) => n.clone(),
+            Some(n) => n,
             None => return false,
         };
 
         if current.borrow().element_kind() == Some(element_kind) {
             self.stack_of_open_elements.pop();
             return true;
-        }
-
-        false
-    }
-
-    // contain_in_stack checks if the specified element is in the stack of open elements.
-    fn contain_in_stack(&mut self, element_kind: ElementKind) -> bool {
-        for i in 0..self.stack_of_open_elements.len() {
-            if self.stack_of_open_elements[i].borrow().element_kind() == Some(element_kind) {
-                return true;
-            }
         }
 
         false
@@ -182,7 +120,7 @@ impl HtmlParser {
         };
 
         // If the current node is NodeKind::Text, then add the text to it.
-        if let NodeKind::Text(ref mut s) = &mut current.borrow_mut().kind() {
+        if let NodeKind::Text(ref mut s) = current.borrow_mut().kind {
             // 3
             s.push(c);
             return;
@@ -203,12 +141,66 @@ impl HtmlParser {
                 .unwrap()
                 .borrow_mut()
                 .set_next_sibling(Some(node.clone())); // 6
+        } else {
+            // 7
+            current.borrow_mut().set_first_child(Some(node.clone())); // 8
+        }
+
+        current.borrow_mut().set_last_child(Rc::downgrade(&node)); // 9
+        node.borrow_mut().set_parent(Rc::downgrade(&current)); // 10
+
+        self.stack_of_open_elements.push(node); // 11
+    }
+
+    fn create_element(&self, tag: &str, attributes: Vec<Attribute>) -> Node {
+        Node::new(NodeKind::Element(Element::new(tag, attributes)))
+    }
+
+    // insert_element adds a new element to the DOM tree.
+    // 1. Get the last element from the stack of open elements. This node called "current".
+    // 2. If the stack is empty, root element is current.
+    // 3. Create a new node and store it to the node variable formatted as RC<RefCell<Node>> to wrap the node.
+    // 4/5/6. If the current node has already a child node, then add the new node to the last child node after finding the brother node.
+    // 7/8. If the brother node is not found, then set the new node as the first child node of the current node.
+    // 9. Set the new node as the last child node of the current node.
+    // 10. Set the parent node of the new node as the current node.
+    //     These steps are necessary to prevent the circular reference.(Rc::downgrade)
+    // 11. Lastly, push the new node to the stack of open elements.
+    // ref. https://html.spec.whatwg.org/multipage/parsing.html#insert-a-foreign-element
+    fn insert_element(&mut self, tag: &str, attributes: Vec<Attribute>) {
+        let window = self.window.borrow();
+        let current = match self.stack_of_open_elements.last() {
+            // 1
+            Some(n) => n.clone(),
+            None => window.document(), // 2
+        };
+        let node = Rc::new(RefCell::new(self.create_element(tag, attributes))); // 3
+
+        if current.borrow().first_child().is_some() {
+            // 4
+            let mut last_sibling = current.borrow().first_child();
+            loop {
+                // 5
+                last_sibling = match last_sibling {
+                    Some(ref node) => {
+                        if node.borrow().next_sibling().is_some() {
+                            node.borrow().next_sibling()
+                        } else {
+                            break;
+                        }
+                    }
+                    None => unimplemented!("last_sibling should be Some."),
+                }
+            }
+
+            last_sibling
+                .as_ref()
+                .unwrap()
+                .borrow_mut()
+                .set_next_sibling(Some(node.clone())); // 6
             node.borrow_mut().set_previous_sibling(Rc::downgrade(
-                &current
-                    .borrow()
-                    .first_child()
-                    .expect("failed to get a first child."),
-            ));
+                &last_sibling.expect("last_sibling should be Some"),
+            ))
         } else {
             // 7
             current.borrow_mut().set_first_child(Some(node.clone())); // 8
@@ -325,6 +317,7 @@ impl HtmlParser {
                     match token {
                         Some(HtmlToken::Char(c)) => {
                             if c == ' ' || c == '\n' {
+                                self.insert_char(c);
                                 token = self.t.next();
                                 continue;
                             }
@@ -344,7 +337,7 @@ impl HtmlParser {
                             // The following code is not in the specification.
                             // But, it is necessary to handle the ommited <head> tag in HTML.
                             // If this code is not included, infinite loop occurs.
-                            if tag == "head" {
+                            if tag == "body" {
                                 self.pop_until(ElementKind::Head);
                                 self.mode = InsertionMode::AfterHead;
                                 continue;
@@ -482,15 +475,15 @@ impl HtmlParser {
                                 }
                             }
                         }
+                        Some(HtmlToken::Eof) | None => {
+                            return self.window.clone();
+                        } // _ => {}
                         Some(HtmlToken::Char(c)) => {
                             // support text content.
                             self.insert_char(c);
                             token = self.t.next();
                             continue;
                         }
-                        Some(HtmlToken::Eof) | None => {
-                            return self.window.clone();
-                        } // _ => {}
                     }
                 }
 

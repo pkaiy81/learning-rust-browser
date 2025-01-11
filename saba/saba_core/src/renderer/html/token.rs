@@ -579,7 +579,7 @@ impl Iterator for HtmlTokenizer {
                 // 3. Otherwise, switch to TemporaryBuffer state and append '</' and current character to the temporary buffer.
                 State::ScriptDataEndTagName => {
                     if c == '>' {
-                        self.state = State::ScriptData;
+                        self.state = State::Data;
                         return self.take_latest_token();
                     }
 

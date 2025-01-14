@@ -1,5 +1,5 @@
 use crate::alloc::string::ToString;
-// use crate::cursor::Cursor;
+use crate::cursor::Cursor;
 use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::String;
@@ -25,16 +25,27 @@ use saba_core::http::HttpResponse;
 use saba_core::renderer::layout::computed_style::FontSize;
 use saba_core::renderer::layout::computed_style::TextDecoration;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum InputMode {
+    Normal,
+    Editing,
+}
+
 #[derive(Debug)]
 pub struct WasabiUI {
     browser: Rc<RefCell<Browser>>,
+    input_url: String,
+    input_mode: InputMode,
     window: Window,
+    cursor: Cursor,
 }
 
 impl WasabiUI {
     pub fn new(browser: Rc<RefCell<Browser>>) -> Self {
         Self {
             browser,
+            input_url: String::new(),
+            input_mode: InputMode::Normal,
             window: Window::new(
                 "saba".to_string(),
                 WHITE,
@@ -44,39 +55,127 @@ impl WasabiUI {
                 WINDOW_HEIGHT,
             )
             .unwrap(),
+            cursor: Cursor::new(),
         }
     }
 
-    pub fn start(&mut self) -> Result<(), Error> {
+    pub fn start(
+        &mut self,
+        handle_url: fn(String) -> Result<HttpResponse, Error>,
+    ) -> Result<(), Error> {
         self.setup()?;
 
-        self.run_app()?;
+        self.run_app(handle_url)?;
 
         Ok(())
     }
 
-    fn run_app(&mut self) -> Result<(), Error> {
+    fn run_app(
+        &mut self,
+        handle_url: fn(String) -> Result<HttpResponse, Error>,
+    ) -> Result<(), Error> {
         loop {
-            self.handle_mouse_input()?;
-            self.handle_key_input()?;
+            self.handle_mouse_input(handle_url)?;
+            self.handle_key_input(handle_url)?;
         }
     }
 
-    fn handle_mouse_input(&mut self) -> Result<(), Error> {
+    fn handle_mouse_input(
+        &mut self,
+        handle_url: fn(String) -> Result<HttpResponse, Error>,
+    ) -> Result<(), Error> {
         if let Some(MouseEvent { button, position }) = Api::get_mouse_cursor_info() {
-            println!("mouse position: {:?}", position);
+            self.window.flush_area(self.cursor.rect());
+            self.cursor.set_position(position.x, position.y);
+            self.window.flush_area(self.cursor.rect());
+            self.cursor.flush();
+
             if button.l() || button.c() || button.r() {
-                println!("mouse clicked {:?}", button);
+                // Caliculate relative position.
+                let relative_pos = (
+                    position.x - WINDOW_INIT_X_POS,
+                    position.y - WINDOW_INIT_Y_POS,
+                );
+
+                // No action when clicking the outside of window.
+                if relative_pos.0 < 0
+                    || relative_pos.0 > WINDOW_WIDTH
+                    || relative_pos.1 < 0
+                    || relative_pos.1 > WINDOW_HEIGHT
+                {
+                    println!("button clicked OUTSIDE window: {button:?} {position:?}");
+
+                    return Ok(());
+                }
+
+                // Change InputMode to Editing when clicking inside of toolbar.
+                if relative_pos.1 < TOOLBAR_HEIGHT + TITLE_BAR_HEIGHT
+                    && relative_pos.1 >= TITLE_BAR_HEIGHT
+                {
+                    self.clear_address_bar()?;
+                    self.input_url = String::new();
+                    self.input_mode = InputMode::Editing;
+                    println!("button clicked in toolbar: {button:?} {position:?}");
+                    return Ok(());
+                }
+
+                self.input_mode = InputMode::Normal;
             }
         }
 
         Ok(())
     }
 
-    fn handle_key_input(&mut self) -> Result<(), Error> {
-        if let Some(c) = Api::read_key() {
-            println!("input text: {:?}", c);
+    fn handle_key_input(
+        &mut self,
+        handle_url: fn(String) -> Result<HttpResponse, Error>,
+    ) -> Result<(), Error> {
+        match self.input_mode {
+            InputMode::Normal => {
+                // Ignore key input when InputMode is Normal.
+                let _ = Api::read_key();
+            }
+            InputMode::Editing => {
+                if let Some(c) = Api::read_key() {
+                    if c == 0x0A as char {
+                        // Start the navigation when the user pressed the enter key.
+                        self.start_navigation(handle_url, self.input_url.clone())?;
+
+                        self.input_url = String::new();
+                        self.input_mode = InputMode::Normal;
+                    } else if c == 0x7F as char || c == 0x08 as char {
+                        // Remove the last character because the user pressed the backspace key or delete key.
+                        self.input_url.pop();
+                        self.update_address_bar()?;
+                    } else {
+                        self.input_url.push(c);
+                        self.update_address_bar()?;
+                    }
+                }
+            }
         }
+
+        Ok(())
+    }
+
+    fn start_navigation(
+        &mut self,
+        handle_url: fn(String) -> Result<HttpResponse, Error>,
+        destination: String,
+    ) -> Result<(), Error> {
+        self.clear_content_area()?;
+
+        match handle_url(destination) {
+            Ok(response) => {
+                let page = self.browser.borrow().current_page();
+                page.borrow_mut().receive_response(response);
+            }
+            Err(e) => {
+                return Err(e);
+            }
+        }
+
+        self.update_ui()?;
 
         Ok(())
     }
@@ -132,6 +231,99 @@ impl WasabiUI {
 
         self.window
             .draw_line(GREY, 71, 3, 71, 1 + ADDRESSBAR_HEIGHT)?;
+
+        Ok(())
+    }
+
+    fn update_address_bar(&mut self) -> Result<(), Error> {
+        // Fill the address bar with white color.
+        if self
+            .window
+            .fill_rect(WHITE, 72, 4, WINDOW_WIDTH - 76, ADDRESSBAR_HEIGHT - 2)
+            .is_err()
+        {
+            return Err(Error::InvalidUI(
+                "failed to clear an address bar".to_string(),
+            ));
+        }
+
+        // Draw input_url to the address bar.
+        if self
+            .window
+            .draw_string(
+                BLACK,
+                74,
+                6,
+                &self.input_url,
+                StringSize::Medium,
+                /*underline=*/ false,
+            )
+            .is_err()
+        {
+            return Err(Error::InvalidUI(
+                "failed to update an address bar".to_string(),
+            ));
+        }
+
+        // Update the window of the address bar.
+        self.window.flush_area(
+            Rect::new(
+                WINDOW_INIT_X_POS,
+                WINDOW_INIT_Y_POS + TITLE_BAR_HEIGHT,
+                WINDOW_WIDTH,
+                TOOLBAR_HEIGHT,
+            )
+            .expect("failed to create a rect for the address bar"),
+        );
+
+        Ok(())
+    }
+
+    fn clear_address_bar(&mut self) -> Result<(), Error> {
+        // Fill the address bar with white color.
+        if self
+            .window
+            .fill_rect(WHITE, 72, 4, WINDOW_WIDTH - 76, ADDRESSBAR_HEIGHT - 2)
+            .is_err()
+        {
+            return Err(Error::InvalidUI(
+                "failed to clear an address bar".to_string(),
+            ));
+        }
+
+        // Update the window of the address bar.
+        self.window.flush_area(
+            Rect::new(
+                WINDOW_INIT_X_POS,
+                WINDOW_INIT_Y_POS + TITLE_BAR_HEIGHT,
+                WINDOW_WIDTH,
+                TOOLBAR_HEIGHT,
+            )
+            .expect("failed to create a rect for the address bar"),
+        );
+
+        Ok(())
+    }
+
+    fn clear_content_area(&mut self) -> Result<(), Error> {
+        // Fill the content area with white color.
+        if self
+            .window
+            .fill_rect(
+                WHITE,
+                0,
+                TOOLBAR_HEIGHT + 2,
+                CONTENT_AREA_WIDTH,
+                CONTENT_AREA_HEIGHT - 2,
+            )
+            .is_err()
+        {
+            return Err(Error::InvalidUI(
+                "failed to clear a content area".to_string(),
+            ));
+        }
+
+        self.window.flush();
 
         Ok(())
     }

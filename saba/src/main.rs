@@ -4,12 +4,10 @@
 extern crate alloc;
 
 use crate::alloc::string::ToString;
-use alloc::fmt::format;
 use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::String;
 use core::cell::RefCell;
-use core::fmt::Result;
 use net_wasabi::http::HttpClient;
 use noli::*;
 use saba_core::browser::Browser;
@@ -17,24 +15,6 @@ use saba_core::error::Error;
 use saba_core::http::HttpResponse;
 use saba_core::url::Url;
 use ui_wasabi::app::WasabiUI;
-
-static TEST_HTTP_RESPONSE: &str = r#"HTTP/1.1 200 OK
-Data: xx xx xx
-
-
-<html>
-<head></head>
-<body>
-    <h1 id="title">H1 title</h1>
-    <h2 class="class">H2 title</h2>
-    <p>Test text.</p>
-    <p>
-        <a href="example.com">Link1</a>
-        <a href="example.com">Link2</a>
-    </p>
-</body>
-</html>
-"#;
 
 fn handle_url(url: String) -> Result<HttpResponse, Error> {
     // Interpret the URL.

@@ -1,4 +1,4 @@
-use noli::bitmap::{self, bitmap_draw_rect};
+use noli::bitmap::bitmap_draw_rect;
 use noli::rect::Rect;
 use noli::sheet::Sheet;
 
@@ -12,6 +12,7 @@ impl Cursor {
         let mut sheet = Sheet::new(Rect::new(0, 0, 10, 10).unwrap());
         let bitmap = sheet.bitmap();
         bitmap_draw_rect(bitmap, 0xff0000, 0, 0, 10, 10).expect("failed to draw a cursor");
+
         Self { sheet }
     }
 

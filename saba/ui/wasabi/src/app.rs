@@ -120,6 +120,19 @@ impl WasabiUI {
                 }
 
                 self.input_mode = InputMode::Normal;
+
+                let position_in_content_area = (
+                    relative_pos.0,
+                    relative_pos.1 - TITLE_BAR_HEIGHT - TOOLBAR_HEIGHT,
+                );
+                let page = self.browser.borrow().current_page();
+                let next_distination = page.borrow_mut().clicked(position_in_content_area);
+
+                if let Some(url) = next_distination {
+                    self.input_url = url.clone();
+                    self.update_address_bar()?;
+                    self.start_navigation(handle_url, url)?;
+                }
             }
         }
 

@@ -2,12 +2,20 @@ use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
 
+static RESERVED_WORDS: [&str; 1] = ["var"];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
     /// https://262.ecma-international.org/#sec-punctuators
     Punctuator(char),
     /// https://262.ecma-international.org/#sec-literals-numeric-literals
     Number(u64),
+    /// https://262.ecma-international.org/#sec-identifier-names
+    Identifier(String),
+    /// https://262.ecma-international.org/#sec-keywords-and-reserved-words
+    Keyword(String),
+    /// https://262.ecma-international.org/#sec-literals-string-literals
+    StringLiteral(String),
 }
 
 pub struct JsLexer {
@@ -44,6 +52,68 @@ impl JsLexer {
 
         return num;
     }
+
+    fn consume_identifier(&mut self) -> String {
+        let mut result = String::new();
+
+        loop {
+            if self.pos >= self.input.len() {
+                return result;
+            }
+
+            if self.input[self.pos].is_ascii_alphanumeric() || self.input[self.pos] == '$' {
+                result.push(self.input[self.pos]);
+                self.pos += 1;
+            } else {
+                return result;
+            }
+        }
+    }
+
+    fn consume_string(&mut self) -> String {
+        let mut result = String::new();
+        self.pos += 1;
+
+        loop {
+            if self.pos >= self.input.len() {
+                return result;
+            }
+
+            if self.input[self.pos] == '"' {
+                // Start of string
+                self.pos += 1;
+                return result;
+            }
+
+            result.push(self.input[self.pos]);
+            self.pos += 1;
+        }
+    }
+
+    fn contains(&self, keyword: &str) -> bool {
+        for i in 0..keyword.len() {
+            if keyword
+                .chars()
+                .nth(i)
+                .expect("failed to access to i-th char")
+                != self.input[self.pos + i]
+            {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    fn check_reserved_word(&self) -> Option<String> {
+        for word in RESERVED_WORDS {
+            if self.contains(word) {
+                return Some(word.to_string());
+            }
+        }
+
+        None
+    }
 }
 
 impl Iterator for JsLexer {
@@ -64,6 +134,13 @@ impl Iterator for JsLexer {
             }
         }
 
+        // If the character is reserved word, return it as a keyword.
+        if let Some(keyword) = self.check_reserved_word() {
+            self.pos += keyword.len();
+            let token = Some(Token::Keyword(keyword));
+            return token;
+        }
+
         let c = self.input[self.pos];
 
         let token = match c {
@@ -74,6 +151,8 @@ impl Iterator for JsLexer {
                 t
             }
             '0'..='9' => Token::Number(self.cosume_number()), // 1
+            // https://262.ecma-international.org/#prod-IdentifierStart
+            'a'..='z' | 'A'..='Z' | '_' | '$' => Token::Identifier(self.consume_identifier()), // p.379
             _ => unimplemented!("char {:?} is not supported yet", c),
         };
 
